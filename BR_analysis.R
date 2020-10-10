@@ -12,8 +12,8 @@ library(patchwork)
 
 # Exploratory data analysis -----------------------------------------------
 
-# Load the processed data (publicly available)
-load("Data/public_CopeData.rda")
+# Load the processed data (available)
+load("Data/CopeData.rda")
 
 # Look at raw correlations and distributions
 GGally::ggpairs(CopeData, columns = c("MLC", "SST", "Chl", "Pred", "Omni_prop",
