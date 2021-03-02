@@ -15,9 +15,11 @@ library(patchwork)
 # Load the processed data (available)
 load("Data/CopeData.rda")
 
-# Look at raw correlations and distributions
-GGally::ggpairs(CopeData, columns = c("MLC", "SST", "Chl", "Pred", "Omni_prop",
-                                      "Oxygen", "Lat_abs", "SST_mon"), progress = FALSE)
+# Look at spearman correlations and distributions
+ggpairs_plot <- GGally::ggpairs(CopeData, columns = c("MLC", "SST", "Chl", "Pred", "Omni_prop",
+                                                      "Oxygen", "Lat_abs", "SST_mon"), progress = FALSE, 
+                                upper = list(continuous = GGally::wrap("cor", method = "spearman", stars = FALSE))
+)
 
 ### Look at the transformations ###
 
@@ -60,7 +62,7 @@ with(CopeData, {
   text(pu[2], pu[4], "(E)", adj = c(1.5,1), cex = 1.5)
   
   # Predation transformed
-  hist(Log_pred, xlab = "Log(Predation)", main = "", prob = TRUE,
+  hist(Log10_pred, xlab = "Log10(Predation)", main = "", prob = TRUE,
        cex.lab = 0.9, col = "grey", 
        border = "black") # much better
   pu <- par("usr")
@@ -108,23 +110,23 @@ legend(7, 0.3, legend=c("Omnivores", "Carnivores"),
 CopeData_WO18 <- CopeData %>% filter(rowSums(is.na(CopeData)) == 0)
 
 # Run competing models
-SST_mod <- glmer(MLC ~ SST_mon + Sqrt_chl + Asin_omni + Log_pred +
-                    (1|Survey) + (1 + TowDays|Survey:Tow_No),
-                  data = CopeData_WO18, family = Gamma(link = log),
-                  weights = Abund_weight,
-                  control = glmerControl(optimizer = "bobyqa"))
+SST_mod <- glmer(MLC ~ SST_mon + Sqrt_chl + Asin_omni + Log10_pred +
+                   (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
+                 data = CopeData_WO18, family = Gamma(link = log),
+                 weights = weighting,
+                 control = glmerControl(optimizer = "bobyqa"))
 
-Oxy_mod <- glmer(MLC ~ Oxygen + Sqrt_chl + Asin_omni + Log_pred +
-                    (1|Survey) + (1 + TowDays|Survey:Tow_No),
-                  data = CopeData_WO18, family = Gamma(link = log),
-                  weights = Abund_weight,
-                  control = glmerControl(optimizer = "bobyqa"))
+Oxy_mod <- glmer(MLC ~ Oxygen + Sqrt_chl + Asin_omni + Log10_pred +
+                   (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
+                 data = CopeData_WO18, family = Gamma(link = log),
+                 weights = weighting,
+                 control = glmerControl(optimizer = "bobyqa"))
 
-Lat_mod <- glmer(MLC ~ Lat_abs + Sqrt_chl + Asin_omni + Log_pred +
-                    (1|Survey) + (1 + TowDays|Survey:Tow_No),
-                  data = CopeData_WO18, family = Gamma(link = log),
-                  weights = Abund_weight,
-                  control = glmerControl(optimizer = "bobyqa"))
+Lat_mod <- glmer(MLC ~ Lat_abs + Sqrt_chl + Asin_omni + Log10_pred +
+                   (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
+                 data = CopeData_WO18, family = Gamma(link = log),
+                 weights = weighting,
+                 control = glmerControl(optimizer = "bobyqa"))
 
 # Compare models based on BIC
 anova(SST_mod, Oxy_mod, Lat_mod)
@@ -138,11 +140,11 @@ MuMIn::r.squaredGLMM(Oxy_mod)
 # Step 2: Higher resolution data models -----------------------------------
 
 # Full model
-hr_mod <- glmer(MLC ~ SST + Sqrt_chl + Asin_omni + Log_pred +
-                    (1|Survey) + (1 + TowDays|Survey:Tow_No),
-                  data = CopeData, family = Gamma(link = log),
-                  weights = Abund_weight,
-                  control = glmerControl(optimizer = "bobyqa"))
+hr_mod <- glmer(MLC ~ SST + Sqrt_chl + Asin_omni + Log10_pred +
+                  (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
+                data = CopeData, family = Gamma(link = log),
+                weights = weighting,
+                control = glmerControl(optimizer = "bobyqa"))
 
 cat("All Fixed effects\n")
 MuMIn::r.squaredGLMM(hr_mod)
@@ -163,7 +165,7 @@ hr_mod3 <- update(hr_mod, . ~ . -Asin_omni)
 cat("No Omnivore proportion\n")
 MuMIn::r.squaredGLMM(hr_mod3)
 
-hr_mod4 <- update(hr_mod, . ~ . -Log_pred)
+hr_mod4 <- update(hr_mod, . ~ . -Log10_pred)
 cat("No Predation\n")
 MuMIn::r.squaredGLMM(hr_mod4)
 
@@ -180,9 +182,13 @@ hr_mod7 <- update(hr_mod, . ~ . -(1 + TowDays|Survey:Tow_No))
 cat("No Tow Number\n")
 MuMIn::r.squaredGLMM(hr_mod7)
 
+hr_mod8 <- update(hr_mod, . ~ . -(1 | Longhurst))
+cat("No Longhurst Province\n")
+MuMIn::r.squaredGLMM(hr_mod8)
+
 
 # Model selection based on BIC
-anova(hr_mod, hr_mod1, hr_mod2, hr_mod3, hr_mod4, hr_mod5, hr_mod6, hr_mod7)
+anova(hr_mod, hr_mod1, hr_mod2, hr_mod3, hr_mod4, hr_mod5, hr_mod6, hr_mod7, hr_mod8)
 
 
 # Checking assumptions ----------------------------------------------------
@@ -190,14 +196,14 @@ anova(hr_mod, hr_mod1, hr_mod2, hr_mod3, hr_mod4, hr_mod5, hr_mod6, hr_mod7)
 ### Normality ###
 
 ## QQplot
-qqnorm(resid(hr_mod), main = "")
-qqline(resid(hr_mod))
+qqnorm(resid(hr_mod, type = "deviance"), main = "")
+qqline(resid(hr_mod, type = "deviance"))
 
 
 ### Heteroskedasticity ###
 
 ## Residual plot
-ggplot(CopeData) + aes(fitted(hr_mod), resid(hr_mod)) + 
+ggplot(CopeData) + aes(fitted(hr_mod), resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = .9, option = "C", limit = range(c(1,1200))) +
   theme(plot.title = element_text(hjust = 0.5), ) + 
@@ -206,28 +212,28 @@ ggplot(CopeData) + aes(fitted(hr_mod), resid(hr_mod)) +
 ## Residuals by predictors
 
 # SST vs residuals
-ggplot(CopeData) + aes(SST, resid(hr_mod)) + 
+ggplot(CopeData) + aes(SST, resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,400))) + 
   labs(title = "Hexplot of residuals for SST") + 
   theme(plot.title = element_text(hjust = 0.5))
 
 # Chl vs residuals
-ggplot(CopeData) + aes(sqrt(Chl), resid(hr_mod)) + 
+ggplot(CopeData) + aes(sqrt(Chl), resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,1000))) +
   labs(title = "Hexplot of residuals for chl") + 
   theme(plot.title = element_text(hjust = 0.5))
 
-# Predator abundance vs residuals
-ggplot(CopeData) + aes(Log_pred, resid(hr_mod)) + 
+# Predation Pressure vs residuals
+ggplot(CopeData) + aes(Log10_pred, resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,1000))) + 
   labs(title = "Hexplot of residuals for log-predation") + 
   theme(plot.title = element_text(hjust = 0.5))
 
 # Omni_prop vs residuals
-ggplot(CopeData) + aes(Omni_prop, resid(hr_mod)) + 
+ggplot(CopeData) + aes(Omni_prop, resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,1000))) +
   labs(title = "Hexplot of residuals for log-predation") +
@@ -305,9 +311,9 @@ ggplot(data = autocorData, aes(x = Lon, y = Lat)) +
 
 
 # Model without random effects
-hr_mod8 <- glm(MLC ~ SST + Sqrt_chl + Asin_omni + Log_pred,  
+hr_mod8 <- glm(MLC ~ SST + Sqrt_chl + Asin_omni + Log10_pred,  
                data = CopeData, family = Gamma(link = log), 
-               weights = Abund_weight)
+               weights = weighting)
 
 # Use residuals from the GLM
 autocorData$resids <- resid(hr_mod8) # Extract residuals of GLM
@@ -331,11 +337,12 @@ ggplot(data = autocorData, aes(x = Lon, y = Lat)) +
 ### Proportion of variance explained by random effects ###
 
 # conditional - marginal R^2
-RE_var <- 0.7773224 - 0.6418764
+RE_var <- 0.6071028 - 0.3362434
 
 # From the summary objects
-0.001103/(0.001103 + 0.002936 + 0.004116) * RE_var # survey/all
-(0.002936 + 0.004116)/(0.001103 + 0.002936 + 0.004116) * RE_var # tow effects /all
+0.0026509/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # survey/all
+(0.0159669 + 0.0119883)/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # tow effects /all
+0.0004819/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # longhurst/all
 
 
 ### Interpretations of fixed effects ###
@@ -351,11 +358,11 @@ exp(coef_tab[, "Estimate"])
 
 # Setup a prediction dataframe
 df <- head(CopeData, 2)
-df <- df %>% select(MLC, SST, Log_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
   within({
     SST <- mean(CopeData$SST)
     Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log_pred <- mean(CopeData$Log_pred)
+    Log10_pred <- mean(CopeData$Log10_pred)
     Omni_prop <- c(1,0)
     Asin_omni <- asin(sqrt(Omni_prop))
     Tow_No <- NULL
@@ -382,11 +389,11 @@ ww_y_hat <- convert_to_weight(y_hat)
 
 ### SST effect sizes ###
 
-df <- df %>% select(MLC, SST, Log_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
   within({
     SST <- c(min(CopeData$SST), max(CopeData$SST))
     Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log_pred <- mean(CopeData$Log_pred)
+    Log10_pred <- mean(CopeData$Log10_pred)
     Asin_omni <- mean(CopeData$Asin_omni)
     Tow_No <- NULL
     Longhurst <- NULL
@@ -416,12 +423,12 @@ ww_y_hat <- convert_to_weight(y_hat)
 
 ### CHL-a effects sizes ###
 
-df <- df %>% select(MLC, SST, Log_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
   within({
     SST <- mean(CopeData$SST)
     Chl <- c(0.018596824,	9.410631) # removed 2 influential obs one on each end
     Sqrt_chl <- sqrt(Chl)
-    Log_pred <- mean(CopeData$Log_pred)
+    Log10_pred <- mean(CopeData$Log10_pred)
     Asin_omni <- mean(CopeData$Asin_omni)
     Tow_No <- NULL
     Longhurst <- NULL
@@ -444,13 +451,13 @@ ww_y_hat <- convert_to_weight(y_hat)
 1 - ww_y_hat[2] / ww_y_hat[1]
 
 
-### Predator abundance effect sizes ###
+### Predation Pressure effect sizes ###
 
-df <- df %>% select(MLC, SST, Log_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
   within({
     SST <- mean(CopeData$SST)
     Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log_pred <- c(min(CopeData$Log_pred), max(CopeData$Log_pred))
+    Log10_pred <- c(min(CopeData$Log10_pred), max(CopeData$Log10_pred))
     Asin_omni <- mean(CopeData$Asin_omni)
     Tow_No <- NULL
     Longhurst <- NULL
@@ -466,7 +473,7 @@ y_hat[2] / y_hat[1]
 y_hat[2] - y_hat[1]
 
 # length per degree
-(y_hat[2] - y_hat[1])/ diff(df$Log_pred)
+(y_hat[2] - y_hat[1])/ diff(df$Log10_pred)
 
 # Percentage change in Mass
 ww_y_hat <- convert_to_weight(y_hat)
@@ -499,7 +506,7 @@ abs_chl_change_RCP2.6<- convert_to_chl(new_NPP_RCP2.6) - convert_to_chl(old_NPP)
 newdat <- with(CopeData, data.frame( Sqrt_chl = c(sqrt(convert_to_chl(old_NPP)),
                                                   sqrt(convert_to_chl(new_NPP_RCP8.5))),
                                      SST  = mean(SST),
-                                     Log_pred  = mean(Log_pred),
+                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions based on our model
@@ -515,7 +522,7 @@ ww[2] / ww[1]
 newdat <- with(CopeData, data.frame( Sqrt_chl = c(sqrt(convert_to_chl(old_NPP)),
                                                   sqrt(convert_to_chl(new_NPP_RCP2.6))),
                                      SST  = mean(SST),
-                                     Log_pred  = mean(Log_pred),
+                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions based on our model
@@ -528,8 +535,8 @@ ww[2] / ww[1]
 
 ### Combined changes ###
 
-1-1*1.025*0.93 #RCP8.5
-1-1*1.006*0.985 #RCP2.6
+1-1*1.016597*0.93 #RCP8.5
+1-1*1.003755*0.984 #RCP2.6
 
 
 # Plots -------------------------------------------------------------------
@@ -558,7 +565,7 @@ easyPredCI <- function(model,newdata=NULL,alpha=0.05) {
 # Make data that spans the SST range
 newdat <- with(CopeData, data.frame( SST = seq(min(SST), max(SST), length.out = 100),
                                      Sqrt_chl  = mean(Sqrt_chl),
-                                     Log_pred  = mean(Log_pred),
+                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions
@@ -586,7 +593,7 @@ ggplot(data = CopeData, mapping = aes(x = SST, y = fitted(hr_mod))) +
             size = error_sz, lty = "dashed") +
   geom_line(data = newdat, aes(x = SST, y = conf.high), col = "dodgerblue", 
             size = error_sz, lty = "dashed") +
-  theme_bw() + annotate("text", x = 0, y = 6, label = "(c)", size = annotate_sz) +
+  theme_bw() + annotate("text", x = 0, y = 6, label = "(d)", size = annotate_sz) +
   theme(axis.text=element_text(size=10), axis.title=element_text(size=13), 
         panel.grid.minor=element_blank(), panel.grid.major.x=element_blank(),
         panel.grid.major.y=element_blank()) + xlab("SST (°C)") + 
@@ -601,7 +608,7 @@ ggplot(data = CopeData, mapping = aes(x = SST, y = fitted(hr_mod))) +
 newdat <- with(CopeData, data.frame( Sqrt_chl = seq(min(Sqrt_chl), 
                                                     max(Sqrt_chl), length.out = 100),
                                      SST  = mean(SST),
-                                     Log_pred  = mean(Log_pred),
+                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions
@@ -625,7 +632,7 @@ ggplot(data = CopeData, mapping = aes(x = Chl, y = fitted(hr_mod))) +
             size = error_sz, lty = "dashed") +
   geom_line(data = newdat, aes(x = Sqrt_chl^2, y = conf.high), col = "dodgerblue", 
             size = error_sz, lty = "dashed") +
-  theme_bw() + annotate("text", x = 0.54, y = 6, label = "(d)", size = annotate_sz) +
+  theme_bw() + annotate("text", x = 0.54, y = 6, label = "(e)", size = annotate_sz) +
   theme(axis.text=element_text(size=10), axis.title=element_text(size=13), 
         panel.grid.minor=element_blank(), panel.grid.major.x=element_blank(),
         panel.grid.major.y=element_blank()) + xlab("Chl-a") + 
@@ -634,13 +641,13 @@ ggplot(data = CopeData, mapping = aes(x = Chl, y = fitted(hr_mod))) +
   scale_y_continuous(breaks = seq(0, 10, by = 1)) 
 
 
-### Predator abundance ###
+### Predation Pressure ###
 
-# Make data that spans the predator abundance range
-newdat <- with(CopeData, data.frame( Log_pred = seq(min(Log_pred), 
-                                                    max(Log_pred), length.out = 100),
-                                     SST  = mean(SST),
-                                     Sqrt_chl  = mean(Sqrt_chl),
+# Make data that spans the Predation Pressure range
+newdat <- with(CopeData, data.frame( Log10_pred = seq(min(Log10_pred), 
+                                                    max(Log10_pred), length.out = 100),
+                                     SST  = (max(SST) + min(SST))/2,
+                                     Sqrt_chl  = (max(Sqrt_chl) + min(Sqrt_chl))/2,
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions
@@ -653,26 +660,26 @@ conf_int <- easyPredCI(hr_mod,newdata = newdat)
 newdat <- cbind(newdat, y_pred, conf_int)
 
 # Inverse log (to natural scale)
-pred_log_inv <- function(x) { exp(x)}
+pred_log10_inv <- function(x) { 10^(x)}
 
 # Make effect plot
 ggplot(data = CopeData, mapping = aes(x = (Pred+min(Pred[Pred != 0])), 
                                       y = fitted(hr_mod))) + 
   geom_ribbon(data = newdat, mapping = aes( y = y_pred,  
                                             ymin = conf.low,
-                                            ymax= conf.high, x = pred_log_inv(Log_pred)),
+                                            ymax= conf.high, x = pred_log_inv(Log10_pred)),
               alpha = .9, fill = "grey80") +
   geom_point(alpha = 0.2, size = point_sz) +
-  geom_line(data = newdat, aes(x = pred_log_inv(Log_pred), y = y_pred), 
+  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = y_pred), 
             col = "dodgerblue", size = line_sz) +
-  geom_line(data = newdat, aes(x = pred_log_inv(Log_pred), y = conf.low), 
+  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = conf.low), 
             col = "dodgerblue", size = error_sz, lty = "dashed") +
-  geom_line(data = newdat, aes(x = pred_log_inv(Log_pred), y = conf.high), 
+  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = conf.high), 
             col = "dodgerblue", size = error_sz, lty = "dashed") +
-  theme_bw() + annotate("text", x = .6, y = 6, label = "(e)", size = annotate_sz) +
+  theme_bw() + annotate("text", x = .6, y = 6, label = "(f)", size = annotate_sz) +
   theme(axis.text=element_text(size=10), axis.title=element_text(size=13), 
         panel.grid.minor=element_blank(), panel.grid.major.x=element_blank(),
-        panel.grid.major.y=element_blank()) + xlab("Predator Abundance") + ylab("Mean length of copepod (mm)") +
+        panel.grid.major.y=element_blank()) + xlab("Predation Pressure") + ylab("Mean length of copepod (mm)") +
   scale_x_continuous(trans = "log10") +
   scale_y_continuous(breaks = seq(0, 10, by = 1)) 
 
@@ -683,7 +690,7 @@ ggplot(data = CopeData, mapping = aes(x = (Pred+min(Pred[Pred != 0])),
 newdat <- with(CopeData, data.frame( Asin_omni = seq(min(Asin_omni), 
                                                      max(Asin_omni), length.out = 100),
                                      SST  = mean(SST),
-                                     Log_pred  = mean(Log_pred),
+                                     Log10_pred  = mean(Log10_pred),
                                      Sqrt_chl = mean(Sqrt_chl)))
 
 # Make predictions
@@ -710,7 +717,7 @@ ggplot(data = CopeData, mapping = aes(x = inv_arcsine(Asin_omni), y = fitted(hr_
             col = "dodgerblue", size = error_sz, lty = "dashed") +
   geom_line(data = newdat, aes(x = inv_arcsine(Asin_omni), y = conf.high), 
             col = "dodgerblue", size = error_sz, lty = "dashed") +
-  theme_bw() + annotate("text", x = 0.05, y = 6, label = "(f)", size = annotate_sz) +
+  theme_bw() + annotate("text", x = 0.05, y = 6, label = "(g)", size = annotate_sz) +
   theme(axis.text=element_text(size=10), axis.title=element_text(size=13), 
         panel.grid.minor=element_blank(), panel.grid.major.x=element_blank(),
         panel.grid.major.y=element_blank()) + xlab("Proportion of Omnivores") + 
@@ -725,7 +732,7 @@ ggplot(data = CopeData, mapping = aes(x = inv_arcsine(Asin_omni), y = fitted(hr_
 REs <- ranef(hr_mod, condVar = TRUE) 
 
 # Extract variance
-qq <- attr(ranef(hr_mod, condVar = TRUE)[[2]], "postVar")
+qq <- attr(ranef(hr_mod, condVar = TRUE)$Survey, "postVar")
 
 # Extract intercepts
 rand.interc <- REs$Survey
@@ -749,7 +756,7 @@ ggplot(df, aes(lev.names, Intercepts)) +
   geom_point(aes(color = lev.names), size = 9) +
   guides(size = 16, shape = "none", 
          color = guide_legend(reverse = TRUE , override.aes = list(size=8))) + 
-  theme_bw() + annotate("text", y = -.3, x = 4, label = "(a)", size = annotate_sz) +
+  theme_bw() + annotate("text", y = -.3, x = 4, label = "(b)", size = annotate_sz) +
   coord_flip() + ylab("Intercept") + xlab("") + 
   scale_color_manual(values=c("green4", "#E69F00", "purple", "royalblue1")) +
   scale_y_continuous(breaks = seq(-.2, .4, by = .2)) +
@@ -770,16 +777,47 @@ my_breaks <- c(1,5,30,175,1000)
 # Make random effect hexplot
 ggplot(towDf, aes(Intercept, Slope)) +
   geom_hex(bins = 30) + theme_bw() + 
-  annotate("text", x = -.2, y = 1, label = "(b)", size = annotate_sz) +
   scale_fill_viridis(begin = 0, end = 1, option = "D", limit = range(c(1,1100)), 
                      trans = "log", breaks = my_breaks, labels = my_breaks)  +
   ylab("Slope") + xlab("Intercept") + labs(fill = "Frequency") +
   guides(size = "none", shape = "none", 
          color = guide_legend(reverse = TRUE , override.aes = list(size=3))) + 
-  annotate("text", y = .2, x = -.33, label = "(b)", size = annotate_sz) +
+  annotate("text", y = .2, x = -.33, label = "(c)", size = annotate_sz) +
   scale_y_continuous(breaks = seq(-0.2, .4, by = .1), limits = c(-.25, .25 )) +
   scale_x_continuous(breaks = seq(-0.3, .6, by = .3))
 
+
+### Longhurst Province ###
+
+qq <- attr(ranef(hr_mod, condVar = TRUE)$Longhurst, "postVar")
+
+# Extract intercepts
+rand.interc <- REs$Longhurst
+
+# Make a dataframe for plotting
+df <- data.frame(Intercepts = REs$Longhurst[,1],
+                 sd.interc = 2*sqrt(qq[,,1:length(qq)]),
+                 lev.names = factor(rownames(rand.interc))) %>% 
+  arrange(Intercepts) %>% 
+  within({  # Reorder levels
+    lev.names <- factor(as.character(lev.names),
+                        as.character(lev.names))
+  })
+
+ggplot(df, aes(lev.names, Intercepts))+ 
+  geom_hline(yintercept=0, linetype = "dashed", color = "black") +
+  geom_errorbar(aes(ymin=Intercepts-sd.interc, 
+                    ymax=Intercepts+sd.interc),
+                width = 0,color="black") +
+  geom_point(color = "black", size = 4.5) +
+  guides(size=FALSE,shape=FALSE) + theme_bw() +
+  theme(axis.text.x=element_text(size=10), 
+        axis.title.x=element_text(size=13),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  coord_flip() + 
+  ylab("Intercept") + xlab("") +
+  annotate("text", y = -.15, x = 28, label = "(a)", size = annotate_sz)
 
 ### CPR map ###
 
