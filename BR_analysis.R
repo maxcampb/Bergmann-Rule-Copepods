@@ -8,6 +8,7 @@ library(lmerTest)
 library(sp)
 library(gstat)
 library(patchwork)
+library(optimx)
 
 
 # Exploratory data analysis -----------------------------------------------
@@ -16,7 +17,7 @@ library(patchwork)
 load("Data/CopeData.rda")
 
 # Look at spearman correlations and distributions
-ggpairs_plot <- GGally::ggpairs(CopeData, columns = c("MLC", "SST", "Chl", "Pred", "Omni_prop",
+ggpairs_plot <- GGally::ggpairs(CopeData, columns = c("MLC", "SST", "Sqrt_chl", "Asin_omni",
                                                       "Oxygen", "Lat_abs", "SST_mon"), progress = FALSE, 
                                 upper = list(continuous = GGally::wrap("cor", method = "spearman", stars = FALSE))
 )
@@ -53,20 +54,6 @@ with(CopeData, {
        border = "black") # much better
   pu <- par("usr")
   text(pu[2], pu[4], "(D)", adj = c(1.5,1), cex = 1.5)
-  
-  # Predation
-  hist(Pred, xlab = "Predation", main = "", prob = TRUE,
-       cex.lab = 0.9, col = "grey", 
-       border = "black") # Heavily right skewed
-  pu <- par("usr")
-  text(pu[2], pu[4], "(E)", adj = c(1.5,1), cex = 1.5)
-  
-  # Predation transformed
-  hist(Log10_pred, xlab = "Log10(Predation)", main = "", prob = TRUE,
-       cex.lab = 0.9, col = "grey", 
-       border = "black") # much better
-  pu <- par("usr")
-  text(pu[2], pu[4], "(F)", adj = c(1.5,1), cex = 1.5)
   
   # Omni_prop
   hist(Omni_prop, xlab = "Omnivore proportion", main = "", prob = TRUE,
@@ -110,22 +97,19 @@ legend(7, 0.3, legend=c("Omnivores", "Carnivores"),
 CopeData_WO18 <- CopeData %>% filter(rowSums(is.na(CopeData)) == 0)
 
 # Run competing models
-SST_mod <- glmer(MLC ~ SST_mon + Sqrt_chl + Asin_omni + Log10_pred +
+SST_mod <- glmer(MLC ~ SST_mon + Sqrt_chl + Asin_omni +
                    (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
                  data = CopeData_WO18, family = Gamma(link = log),
-                 weights = weighting,
                  control = glmerControl(optimizer = "bobyqa"))
 
-Oxy_mod <- glmer(MLC ~ Oxygen + Sqrt_chl + Asin_omni + Log10_pred +
+Oxy_mod <- glmer(MLC ~ Oxygen + Sqrt_chl + Asin_omni +
                    (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
                  data = CopeData_WO18, family = Gamma(link = log),
-                 weights = weighting,
                  control = glmerControl(optimizer = "bobyqa"))
 
-Lat_mod <- glmer(MLC ~ Lat_abs + Sqrt_chl + Asin_omni + Log10_pred +
+Lat_mod <- glmer(MLC ~ Lat_abs + Sqrt_chl + Asin_omni + 
                    (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
                  data = CopeData_WO18, family = Gamma(link = log),
-                 weights = weighting,
                  control = glmerControl(optimizer = "bobyqa"))
 
 # Compare models based on BIC
@@ -140,11 +124,10 @@ MuMIn::r.squaredGLMM(Oxy_mod)
 # Step 2: Higher resolution data models -----------------------------------
 
 # Full model
-hr_mod <- glmer(MLC ~ SST + Sqrt_chl + Asin_omni + Log10_pred +
+hr_mod <- glmer(MLC ~ SST + Sqrt_chl + Asin_omni + 
                   (1|Survey) + (1 + TowDays|Survey:Tow_No) + ( 1 |Longhurst),
                 data = CopeData, family = Gamma(link = log),
-                weights = weighting,
-                control = glmerControl(optimizer = "bobyqa"))
+                control = glmerControl(optimizer = "optimx", optCtrl=list(method = "nlminb")))
 
 cat("All Fixed effects\n")
 MuMIn::r.squaredGLMM(hr_mod)
@@ -165,30 +148,26 @@ hr_mod3 <- update(hr_mod, . ~ . -Asin_omni)
 cat("No Omnivore proportion\n")
 MuMIn::r.squaredGLMM(hr_mod3)
 
-hr_mod4 <- update(hr_mod, . ~ . -Log10_pred)
-cat("No Predation\n")
-MuMIn::r.squaredGLMM(hr_mod4)
-
 ## Random effect removals
-hr_mod5 <- update(hr_mod, . ~ . -(1|Survey))
+hr_mod4 <- update(hr_mod, . ~ . -(1|Survey))
 cat("No Survey\n")
 MuMIn::r.squaredGLMM(hr_mod5)
 
-hr_mod6 <- update(hr_mod, . ~ . -(1 + TowDays|Survey:Tow_No) + (1|Survey:Tow_No))
+hr_mod5 <- update(hr_mod, . ~ . -(1 + TowDays|Survey:Tow_No) + (1|Survey:Tow_No))
 cat("No Slope for TowDays\n")
 MuMIn::r.squaredGLMM(hr_mod6)
 
-hr_mod7 <- update(hr_mod, . ~ . -(1 + TowDays|Survey:Tow_No))
+hr_mod6 <- update(hr_mod, . ~ . -(1 + TowDays|Survey:Tow_No))
 cat("No Tow Number\n")
 MuMIn::r.squaredGLMM(hr_mod7)
 
-hr_mod8 <- update(hr_mod, . ~ . -(1 | Longhurst))
+hr_mod7 <- update(hr_mod, . ~ . -(1 | Longhurst))
 cat("No Longhurst Province\n")
 MuMIn::r.squaredGLMM(hr_mod8)
 
 
 # Model selection based on BIC
-anova(hr_mod, hr_mod1, hr_mod2, hr_mod3, hr_mod4, hr_mod5, hr_mod6, hr_mod7, hr_mod8)
+anova(hr_mod, hr_mod1, hr_mod2, hr_mod3, hr_mod4, hr_mod5, hr_mod6, hr_mod7)
 
 
 # Checking assumptions ----------------------------------------------------
@@ -225,18 +204,11 @@ ggplot(CopeData) + aes(sqrt(Chl), resid(hr_mod, type = "pearson")) +
   labs(title = "Hexplot of residuals for chl") + 
   theme(plot.title = element_text(hjust = 0.5))
 
-# Predation Pressure vs residuals
-ggplot(CopeData) + aes(Log10_pred, resid(hr_mod, type = "pearson")) + 
-  geom_hex(bins = 80) + theme_bw() + 
-  scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,1000))) + 
-  labs(title = "Hexplot of residuals for log-predation") + 
-  theme(plot.title = element_text(hjust = 0.5))
-
 # Omni_prop vs residuals
-ggplot(CopeData) + aes(Omni_prop, resid(hr_mod, type = "pearson")) + 
+ggplot(CopeData) + aes(asin_omni, resid(hr_mod, type = "pearson")) + 
   geom_hex(bins = 80) + theme_bw() + 
   scale_fill_viridis(begin = 0, end = 1, option = "C", limit = range(c(1,1000))) +
-  labs(title = "Hexplot of residuals for log-predation") +
+  labs(title = "Hexplot of residuals for omnivore proportion") +
   theme(plot.title = element_text(hjust = 0.5))
 
 
@@ -311,9 +283,8 @@ ggplot(data = autocorData, aes(x = Lon, y = Lat)) +
 
 
 # Model without random effects
-hr_mod8 <- glm(MLC ~ SST + Sqrt_chl + Asin_omni + Log10_pred,  
-               data = CopeData, family = Gamma(link = log), 
-               weights = weighting)
+hr_mod8 <- glm(MLC ~ SST + Sqrt_chl + Asin_omni,  
+               data = CopeData, family = Gamma(link = log))
 
 # Use residuals from the GLM
 autocorData$resids <- resid(hr_mod8) # Extract residuals of GLM
@@ -337,12 +308,12 @@ ggplot(data = autocorData, aes(x = Lon, y = Lat)) +
 ### Proportion of variance explained by random effects ###
 
 # conditional - marginal R^2
-RE_var <- 0.6071028 - 0.3362434
+RE_var <- 0.4979803 - 0.09215131
 
 # From the summary objects
-0.0026509/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # survey/all
-(0.0159669 + 0.0119883)/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # tow effects /all
-0.0004819/(0.0119883 + 0.0159669 + 0.0004819 + 0.0026509) * RE_var # longhurst/all
+0.0081754/(0.0438111 + 0.0952570 + 0.0001882 + 0.0081754) * RE_var # survey/all
+(0.0438111 + 0.0952570)/(0.0438111 + 0.0952570 + 0.0001882 + 0.0081754) * RE_var # tow effects /all
+0.0001882/(0.0438111 + 0.0952570 + 0.0001882 + 0.0081754) * RE_var # longhurst/all
 
 
 ### Interpretations of fixed effects ###
@@ -358,11 +329,10 @@ exp(coef_tab[, "Estimate"])
 
 # Setup a prediction dataframe
 df <- head(CopeData, 2)
-df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST,  Chl,  Asin_omni) %>% 
   within({
     SST <- mean(CopeData$SST)
     Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log10_pred <- mean(CopeData$Log10_pred)
     Omni_prop <- c(1,0)
     Asin_omni <- asin(sqrt(Omni_prop))
     Tow_No <- NULL
@@ -389,11 +359,10 @@ ww_y_hat <- convert_to_weight(y_hat)
 
 ### SST effect sizes ###
 
-df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST,  Chl,  Asin_omni) %>% 
   within({
     SST <- c(min(CopeData$SST), max(CopeData$SST))
     Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log10_pred <- mean(CopeData$Log10_pred)
     Asin_omni <- mean(CopeData$Asin_omni)
     Tow_No <- NULL
     Longhurst <- NULL
@@ -423,12 +392,11 @@ ww_y_hat <- convert_to_weight(y_hat)
 
 ### CHL-a effects sizes ###
 
-df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
+df <- df %>% select(MLC, SST,  Chl,  Asin_omni) %>% 
   within({
     SST <- mean(CopeData$SST)
     Chl <- c(0.018596824,	9.410631) # removed 2 influential obs one on each end
     Sqrt_chl <- sqrt(Chl)
-    Log10_pred <- mean(CopeData$Log10_pred)
     Asin_omni <- mean(CopeData$Asin_omni)
     Tow_No <- NULL
     Longhurst <- NULL
@@ -449,35 +417,6 @@ y_hat[2] - y_hat[1]
 # Percentage change in Mass
 ww_y_hat <- convert_to_weight(y_hat)
 1 - ww_y_hat[2] / ww_y_hat[1]
-
-
-### Predation Pressure effect sizes ###
-
-df <- df %>% select(MLC, SST, Log10_pred,  Chl,  Asin_omni) %>% 
-  within({
-    SST <- mean(CopeData$SST)
-    Sqrt_chl <- mean(CopeData$Sqrt_chl)
-    Log10_pred <- c(min(CopeData$Log10_pred), max(CopeData$Log10_pred))
-    Asin_omni <- mean(CopeData$Asin_omni)
-    Tow_No <- NULL
-    Longhurst <- NULL
-  })
-
-# Make predictions based on our model
-y_hat <- predict(hr_mod, df, re.form = NA, type = "response")
-
-# Calculate the proportional change
-y_hat[2] / y_hat[1]
-
-# Absolute change
-y_hat[2] - y_hat[1]
-
-# length per degree
-(y_hat[2] - y_hat[1])/ diff(df$Log10_pred)
-
-# Percentage change in Mass
-ww_y_hat <- convert_to_weight(y_hat)
-ww_y_hat[2] / ww_y_hat[1]
 
 
 # Chl predictions for climate change --------------------------------------
@@ -506,7 +445,6 @@ abs_chl_change_RCP2.6<- convert_to_chl(new_NPP_RCP2.6) - convert_to_chl(old_NPP)
 newdat <- with(CopeData, data.frame( Sqrt_chl = c(sqrt(convert_to_chl(old_NPP)),
                                                   sqrt(convert_to_chl(new_NPP_RCP8.5))),
                                      SST  = mean(SST),
-                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions based on our model
@@ -522,7 +460,6 @@ ww[2] / ww[1]
 newdat <- with(CopeData, data.frame( Sqrt_chl = c(sqrt(convert_to_chl(old_NPP)),
                                                   sqrt(convert_to_chl(new_NPP_RCP2.6))),
                                      SST  = mean(SST),
-                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions based on our model
@@ -533,10 +470,9 @@ ww <- convert_to_weight(y_hat)
 ww[2] / ww[1]
 
 
-### Combined changes ###
-
-1-1*1.016597*0.93 #RCP8.5
-1-1*1.003755*0.984 #RCP2.6
+# Combined changes
+1-1*1.012*0.927 #RCP8.5
+1-1*1.003*0.984 #RCP2.6
 
 
 # Plots -------------------------------------------------------------------
@@ -565,7 +501,6 @@ easyPredCI <- function(model,newdata=NULL,alpha=0.05) {
 # Make data that spans the SST range
 newdat <- with(CopeData, data.frame( SST = seq(min(SST), max(SST), length.out = 100),
                                      Sqrt_chl  = mean(Sqrt_chl),
-                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions
@@ -608,7 +543,6 @@ ggplot(data = CopeData, mapping = aes(x = SST, y = fitted(hr_mod))) +
 newdat <- with(CopeData, data.frame( Sqrt_chl = seq(min(Sqrt_chl), 
                                                     max(Sqrt_chl), length.out = 100),
                                      SST  = mean(SST),
-                                     Log10_pred  = mean(Log10_pred),
                                      Asin_omni = mean(Asin_omni)))
 
 # Make predictions
@@ -641,56 +575,12 @@ ggplot(data = CopeData, mapping = aes(x = Chl, y = fitted(hr_mod))) +
   scale_y_continuous(breaks = seq(0, 10, by = 1)) 
 
 
-### Predation Pressure ###
-
-# Make data that spans the Predation Pressure range
-newdat <- with(CopeData, data.frame( Log10_pred = seq(min(Log10_pred), 
-                                                    max(Log10_pred), length.out = 100),
-                                     SST  = (max(SST) + min(SST))/2,
-                                     Sqrt_chl  = (max(Sqrt_chl) + min(Sqrt_chl))/2,
-                                     Asin_omni = mean(Asin_omni)))
-
-# Make predictions
-y_pred <- predict(hr_mod,re.form=NA,newdata=newdat,type="response")
-# Estimate the confidence intervals using Ben Bolker's CI 
-# function (based on uncertainty in fixed effects only)
-conf_int <- easyPredCI(hr_mod,newdata = newdat)
-
-# Bind data and predictions
-newdat <- cbind(newdat, y_pred, conf_int)
-
-# Inverse log (to natural scale)
-pred_log10_inv <- function(x) { 10^(x)}
-
-# Make effect plot
-ggplot(data = CopeData, mapping = aes(x = (Pred+min(Pred[Pred != 0])), 
-                                      y = fitted(hr_mod))) + 
-  geom_ribbon(data = newdat, mapping = aes( y = y_pred,  
-                                            ymin = conf.low,
-                                            ymax= conf.high, x = pred_log_inv(Log10_pred)),
-              alpha = .9, fill = "grey80") +
-  geom_point(alpha = 0.2, size = point_sz) +
-  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = y_pred), 
-            col = "dodgerblue", size = line_sz) +
-  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = conf.low), 
-            col = "dodgerblue", size = error_sz, lty = "dashed") +
-  geom_line(data = newdat, aes(x = pred_log10_inv(Log10_pred), y = conf.high), 
-            col = "dodgerblue", size = error_sz, lty = "dashed") +
-  theme_bw() + annotate("text", x = .6, y = 6, label = "(f)", size = annotate_sz) +
-  theme(axis.text=element_text(size=10), axis.title=element_text(size=13), 
-        panel.grid.minor=element_blank(), panel.grid.major.x=element_blank(),
-        panel.grid.major.y=element_blank()) + xlab("Predation Pressure") + ylab("Mean length of copepod (mm)") +
-  scale_x_continuous(trans = "log10") +
-  scale_y_continuous(breaks = seq(0, 10, by = 1)) 
-
-
 ### Omnivore proportion ###
 
 # Make data that spans the range of proportion of omnivores
 newdat <- with(CopeData, data.frame( Asin_omni = seq(min(Asin_omni), 
                                                      max(Asin_omni), length.out = 100),
                                      SST  = mean(SST),
-                                     Log10_pred  = mean(Log10_pred),
                                      Sqrt_chl = mean(Sqrt_chl)))
 
 # Make predictions
